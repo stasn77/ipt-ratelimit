@@ -224,7 +224,6 @@ static int ratelimit_seq_ent_show(struct ratelimit_match *mt,
 			if (mti->prefix != 32)
 				seq_printf(s, "/%d", mti->prefix);
 		}
-
 	}
 
 	seq_printf(s, " cir %u cbs %u ebs %u;",
@@ -352,7 +351,6 @@ int in_pton(const char *src, int srclen, struct sockaddr_storage *dst, int delim
 			((struct sockaddr_in *)dst)->sin_addr.s_addr = TC_H_MAKE(maj<<16, min);
 			dst->ss_family = AF_INET;
 			*end = src + snprintf(NULL, 0, "%x:%x", maj, min);
-			pr_err("Arg (cmd: %d)\n", snprintf(NULL, 0, "%x:%x", maj, min));
 			return 1;
 		} else
 			return 0;
