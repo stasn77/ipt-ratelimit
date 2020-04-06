@@ -1,5 +1,5 @@
-KVER   ?= $(shell uname -r)
-#KVER   ?= $(shell cat /usr/src/linux/include/config/kernel.release)
+#KVER   ?= $(shell uname -r)
+KVER   ?= $(shell cat /usr/src/linux/include/config/kernel.release)
 KDIR   ?= /lib/modules/$(KVER)/build/
 DEPMOD  = /sbin/depmod -a
 CC     ?= gcc

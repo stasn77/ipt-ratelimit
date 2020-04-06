@@ -506,7 +506,7 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 				prefix = 128;
 			memcpy(mt->addr.ip6, &((struct sockaddr_in6 *)&addr)->sin6_addr, sizeof(mt->addr.ip6));
 		} else {
-			if (prefix > 32)
+			if ((prefix > 32) || (ht->mode & (XT_RATELIMIT_PRIO|XT_RATELIMIT_MARK)))
 			       prefix = 32;
 			mt->addr.ip = ((struct sockaddr_in *)&addr)->sin_addr.s_addr;
 		}
