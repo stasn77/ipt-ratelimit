@@ -35,6 +35,7 @@
 #include <linux/in.h>
 #include <linux/ip.h>
 #include <linux/ipv6.h>
+#include <net/pkt_sched.h>
 #include <net/net_namespace.h>
 #include <net/netns/generic.h>
 #include <linux/netfilter/x_tables.h>
@@ -144,8 +145,10 @@ struct xt_ratelimit_htable {
 	unsigned int ent_count;		/* currently entities linked */
 	unsigned int size;		/* hash array size, set from hashsize */
 	int other;			/* what to do with 'other' packets */
+	bool persistent;		/* make proc persistent */
 	struct net *net;		/* for destruction */
 	struct proc_dir_entry *pde;
+	__u32 mode;
 	char name[XT_RATELIMIT_NAME_LEN];
 	int prefix_count[NUM_PREFIX];	/* housekeeping of bitmask */
 	DECLARE_BITMAP(prefix_bitmap, NUM_PREFIX);
@@ -190,7 +193,7 @@ unsigned long calc_rate_est(const struct ratelimit_stat *stat)
 #define SAFEDIV(x,y) ((y)? ({ u64 __tmp = x; do_div(__tmp, y); (unsigned int)__tmp; }) : 0)
 
 static int ratelimit_seq_ent_show(struct ratelimit_match *mt,
-    struct seq_file *s)
+    struct seq_file *s, __u32 mode)
 {
 	struct ratelimit_ent *ent = mt->ent;
 	int i;
@@ -205,7 +208,14 @@ static int ratelimit_seq_ent_show(struct ratelimit_match *mt,
 	for (i = 0; i < ent->mtcnt; i++) {
 		struct ratelimit_match *mti = &ent->matches[i];
 
-		if (mti->family == AF_INET6) {
+		if (mode & XT_RATELIMIT_PRIO)
+			seq_printf(s, "%s%x:%x",
+			    i == 0? "" : ",",
+			    TC_H_MAJ(mti->addr.ip)>>16,
+			    TC_H_MIN(mti->addr.ip));
+		else if (mode & XT_RATELIMIT_MARK)
+			seq_printf(s, "%s0x%x", i == 0? "" : ",", mti->addr.ip);
+		else if (mti->family == AF_INET6) {
 			seq_printf(s, "%s%pI6c", i == 0? "" : ",", &mti->addr);
 			if (mti->prefix != 128)
 				seq_printf(s, "/%d", mti->prefix);
@@ -214,7 +224,9 @@ static int ratelimit_seq_ent_show(struct ratelimit_match *mt,
 			if (mti->prefix != 32)
 				seq_printf(s, "/%d", mti->prefix);
 		}
+
 	}
+
 	seq_printf(s, " cir %u cbs %u ebs %u;",
 	    ent->car.cir * (HZ * BITS_PER_BYTE), ent->car.cbs, ent->car.ebs);
 
@@ -254,7 +266,7 @@ static int ratelimit_seq_show(struct seq_file *s, void *v)
 	/* print everything from the bucket at once */
 	if (!hlist_empty(&ht->hash[*bucket])) {
 		compat_hlist_for_each_entry(mt, pos, &ht->hash[*bucket], node)
-			if (ratelimit_seq_ent_show(mt, s))
+			if (ratelimit_seq_ent_show(mt, s, ht->mode))
 				return -1;
 	}
 	return 0;
@@ -332,9 +344,28 @@ static void ratelimit_ent_add(struct xt_ratelimit_htable *ht, struct ratelimit_e
 static void ratelimit_ent_del(struct xt_ratelimit_htable *ht, struct ratelimit_ent *ent);
 
 /* convert ipv4 or ipv6 address string into struct sockaddr */
-int in_pton(const char *src, int srclen, struct sockaddr_storage *dst, int delim, const char **end)
+int in_pton(const char *src, int srclen, struct sockaddr_storage *dst, int delim, const char **end, __u32 mode)
 {
-	if (in4_pton(src, srclen, (u8 *)&((struct sockaddr_in *)dst)->sin_addr, delim, end)) {
+	if (mode & XT_RATELIMIT_PRIO) {
+		unsigned maj, min;
+		if (sscanf(src, "%x:%x", &maj, &min) == 2) {
+			((struct sockaddr_in *)dst)->sin_addr.s_addr = TC_H_MAKE(maj<<16, min);
+			dst->ss_family = AF_INET;
+			*end = src + snprintf(NULL, 0, "%x:%x", maj, min);
+			pr_err("Arg (cmd: %d)\n", snprintf(NULL, 0, "%x:%x", maj, min));
+			return 1;
+		} else
+			return 0;
+	} else if (mode & XT_RATELIMIT_MARK) {
+		unsigned mark;
+		if (sscanf(src, "0x%x", &mark) == 1) {
+			((struct sockaddr_in *)dst)->sin_addr.s_addr = mark;
+			dst->ss_family = AF_INET;
+			*end = src + snprintf(NULL, 0, "0x%x", mark); ;
+			return 1;
+		} else
+			return 0;
+	} else if (in4_pton(src, srclen, (u8 *)&((struct sockaddr_in *)dst)->sin_addr, delim, end)) {
 		dst->ss_family = AF_INET;
 		return 1;
 	} else if (in6_pton(src, srclen, (u8 *)&((struct sockaddr_in6 *)dst)->sin6_addr, delim, end)) {
@@ -409,6 +440,10 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 				ht->other = OT_MATCH;
 			else if (strcmp(str, "nomatch") == 0)
 				ht->other = OT_ZERO;
+			else if (strcmp(str, "pers") == 0)
+				ht->persistent = true;
+			else if (strcmp(str, "temp") == 0)
+				ht->persistent = false;
 			else if (strcmp(str, "flush") == 0)
 				ratelimit_table_flush(ht);
 			else
@@ -430,7 +465,7 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 	/* determine address set size */
 	ent_size = 0;
 	for (p = str;
-	    p < endp && *p && (ptok = in_pton(p, size - (p - str), &addr, -1, &p));
+	    p < endp && *p && (ptok = in_pton(p, size - (p - str), &addr, -1, &p, ht->mode));
 	    ++p) {
 		++ent_size;
 		if ((p + 1) < endp && *p == '/')
@@ -454,7 +489,7 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 
 	spin_lock_init(&ent->lock_bh);
 	for (i = 0, p = str;
-	    p < endp && *p && in_pton(p, size - (p - str), &addr, -1, &p);
+	    p < endp && *p && in_pton(p, size - (p - str), &addr, -1, &p, ht->mode);
 	    ++p, ++i) {
 		struct ratelimit_match *mt = &ent->matches[i];
 		int j;
@@ -582,7 +617,7 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 		if (!ent_chk) {
 			if (warn)
 				pr_err("Del op doesn't reference any existing address (cmd: %s)\n", buf);
-			goto unlock_einval;
+			goto unlock_nowarn;
 		}
 		if (ent_chk->mtcnt != ent->mtcnt) {
 			pr_err("Del op doesn't match other rule set fully (cmd: %s)\n", buf);
@@ -602,8 +637,9 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 		}
 	} else
 		ratelimit_ent_del(ht, ent_chk);
-	spin_unlock(&ht->lock);
 
+unlock_nowarn:
+	spin_unlock(&ht->lock);
 	if (ent)
 		kvfree(ent);
 	return 0;
@@ -691,6 +727,7 @@ static int htable_create(struct net *net, struct xt_ratelimit_mtinfo *minfo)
 	for (i = 0; i < hsize; i++)
 		INIT_HLIST_HEAD(&ht->hash[i]);
 
+	ht->mode = minfo->mode;
 	ht->size = hsize;
 	ht->use = 1;
 	ht->mt_count = 0;
@@ -942,7 +979,7 @@ static void htable_put(struct xt_ratelimit_htable *ht)
 	/* caller ratelimit_mt_destroy, iptables rule deletion */
 	/* under ratelimit_mutex */
 {
-	if (--ht->use == 0) {
+	if (--ht->use == 0 && (! ht->persistent)) {
 		hlist_del(&ht->node);
 		htable_destroy(ht);
 	}
@@ -978,7 +1015,11 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	int invprefix;
 	int match = false; /* no match, no drop */
 
-	if (unlikely(family == NFPROTO_IPV6)) {
+	if (mtinfo->mode & XT_RATELIMIT_PRIO)
+		addr.ip = skb->priority;
+	else if (mtinfo->mode & XT_RATELIMIT_MARK)
+		addr.ip = skb->mark;
+	else if (unlikely(family == NFPROTO_IPV6)) {
 		const struct ipv6hdr *iph = ipv6_hdr(skb);
 		memcpy(addr.ip6, (mtinfo->mode & XT_RATELIMIT_DST) ?
 		    &iph->daddr : &iph->saddr, sizeof(addr.ip6));

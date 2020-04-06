@@ -59,7 +59,11 @@ static const struct xt_option_entry ratelimit_opts[] = {
 
 static int parse_mode(uint32_t *mode, const char *option_arg)
 {
-	if (strcasecmp("dst", option_arg) == 0)
+	if (strcasecmp("prio", option_arg) == 0)
+		*mode |= XT_RATELIMIT_PRIO;
+	else if (strcasecmp("mark", option_arg) == 0)
+		*mode |= XT_RATELIMIT_MARK;
+	else if (strcasecmp("dst", option_arg) == 0)
 		*mode |= XT_RATELIMIT_DST;
 	else if (strcasecmp("src", option_arg) == 0)
 		*mode |= XT_RATELIMIT_SRC;
@@ -71,7 +75,11 @@ static int parse_mode(uint32_t *mode, const char *option_arg)
 static void print_mode(unsigned int mode)
 {
 	/* DST is primary and exclusive with SRC*/
-	if (mode & XT_RATELIMIT_DST)
+	if (mode & XT_RATELIMIT_PRIO)
+		fputs("prio", stdout);
+	else if (mode & XT_RATELIMIT_MARK)
+		fputs("mark", stdout);
+	else if (mode & XT_RATELIMIT_DST)
 		fputs("dst", stdout);
 	else if (mode & XT_RATELIMIT_SRC)
 		fputs("src", stdout);
@@ -105,7 +113,7 @@ static void ratelimit_print(const void *ip, const struct xt_entry_match *match,
 {
 	const struct xt_ratelimit_mtinfo *info = (const void *)match->data;
 
-	fputs("ratelimit:", stdout);
+	fputs(" ratelimit:", stdout);
 	printf(" set %s", info->name);
 	fputs(" mode ", stdout);
 	print_mode(info->mode);
