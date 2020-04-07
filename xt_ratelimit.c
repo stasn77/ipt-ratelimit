@@ -1013,7 +1013,7 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	int invprefix;
 	int match = false; /* no match, no drop */
 
-	if (mtinfo->mode & XT_RATELIMIT_PRIO)
+	if (likely(mtinfo->mode & XT_RATELIMIT_PRIO))
 		addr.ip = skb->priority;
 	else if (mtinfo->mode & XT_RATELIMIT_MARK)
 		addr.ip = skb->mark;

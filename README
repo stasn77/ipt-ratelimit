@@ -65,7 +65,7 @@ ipt-ratelimit linux kernel module by <abc@telekom.ru> -- (c) 2015-2017.
     ratelimit match options:
       --ratelimit-set <name>    Name of the ratelimit set to be used.
 				DEFAULT will be used if none given.
-      --ratelimit-mode <mode>   Address match: src or dst.
+      --ratelimit-mode <mode>   Address match: prio, mark, src or dst.
 
   Both options are mandatory. Every set should be first created with iptables
   before it will have configuration file /proc/net/ipt_ratelimit/<name>
@@ -85,6 +85,11 @@ ipt-ratelimit linux kernel module by <abc@telekom.ru> -- (c) 2015-2017.
     * To add IPs or CIDRs to the set write string in the following format:
 
        +IPv4[,IPv6,CIDR...] bitrate [normal_burst [extended_burst]]
+
+    * To add PRIOs or MARKs to the set write string in the following format:
+
+       +0xMARK[,0xMARK...] bitrate [normal_burst [extended_burst]]
+       +0xMAJ:MIN[,MAJ:MIN...] bitrate [normal_burst [extended_burst]]
 
     Examples:
 
@@ -107,6 +112,9 @@ ipt-ratelimit linux kernel module by <abc@telekom.ru> -- (c) 2015-2017.
 
       - add multiple IPs, rate will be calculated for them together (not
         separately). For example if you want limit client with multiple IPs.
+
+      # echo +0x18BD 10000000 > /proc/net/ipt_ratelimit/name0
+      # echo +1:18bd 10000000 > /proc/net/ipt_ratelimit/name0
 
     * To delete IPs from the set:
 
