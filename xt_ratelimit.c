@@ -345,7 +345,6 @@ static void ratelimit_ent_del(struct xt_ratelimit_htable *ht, struct ratelimit_e
 /* convert ipv4 or ipv6 address string into struct sockaddr */
 int in_pton(const char *src, int srclen, struct sockaddr_storage *dst, int delim, const char **end, __u32 mode)
 {
-	int ret = 0;
 	unsigned mark, maj, min;
 	switch (mode & XT_RATELIMIT_MASK) {
 	case XT_RATELIMIT_PRIO:
@@ -353,28 +352,27 @@ int in_pton(const char *src, int srclen, struct sockaddr_storage *dst, int delim
 			((struct sockaddr_in *)dst)->sin_addr.s_addr = TC_H_MAKE(maj<<16, min);
 			dst->ss_family = AF_INET;
 			*end = src + snprintf(NULL, 0, "%x:%x", maj, min);
-			ret = 1;
+			return 1;
 		}
-		break;
+		return 0;
 	case XT_RATELIMIT_MARK:
 		if (sscanf(src, "0x%x", &mark) == 1) {
 			((struct sockaddr_in *)dst)->sin_addr.s_addr = mark;
 			dst->ss_family = AF_INET;
 			*end = src + snprintf(NULL, 0, "0x%x", mark); ;
-			ret = 1;
+			return 1;
 		}
-		break;
+		return 0;
 	default:
 		if (in4_pton(src, srclen, (u8 *)&((struct sockaddr_in *)dst)->sin_addr, delim, end)) {
 			dst->ss_family = AF_INET;
-			ret = 1;
+			return 1;
 		} else if (in6_pton(src, srclen, (u8 *)&((struct sockaddr_in6 *)dst)->sin6_addr, delim, end)) {
 			dst->ss_family = AF_INET6;
-			ret = 1;
+			return 1;
 		}
-		break;
 	}
-	return ret;
+	return 0;
 }
 
 static __be32 set_netmask(short prefix)
@@ -1034,7 +1032,6 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 			addr.ip = (mtinfo->mode & XT_RATELIMIT_DST) ?
 				iph->daddr : iph->saddr;
 		}
-		break;
 	}
 
 	rcu_read_lock();
