@@ -345,32 +345,36 @@ static void ratelimit_ent_del(struct xt_ratelimit_htable *ht, struct ratelimit_e
 /* convert ipv4 or ipv6 address string into struct sockaddr */
 int in_pton(const char *src, int srclen, struct sockaddr_storage *dst, int delim, const char **end, __u32 mode)
 {
-	if (mode & XT_RATELIMIT_PRIO) {
-		unsigned maj, min;
+	int ret = 0;
+	unsigned mark, maj, min;
+	switch (mode & XT_RATELIMIT_MASK) {
+	case XT_RATELIMIT_PRIO:
 		if (sscanf(src, "%x:%x", &maj, &min) == 2) {
 			((struct sockaddr_in *)dst)->sin_addr.s_addr = TC_H_MAKE(maj<<16, min);
 			dst->ss_family = AF_INET;
 			*end = src + snprintf(NULL, 0, "%x:%x", maj, min);
-			return 1;
-		} else
-			return 0;
-	} else if (mode & XT_RATELIMIT_MARK) {
-		unsigned mark;
+			ret = 1;
+		}
+		break;
+	case XT_RATELIMIT_MARK:
 		if (sscanf(src, "0x%x", &mark) == 1) {
 			((struct sockaddr_in *)dst)->sin_addr.s_addr = mark;
 			dst->ss_family = AF_INET;
 			*end = src + snprintf(NULL, 0, "0x%x", mark); ;
-			return 1;
-		} else
-			return 0;
-	} else if (in4_pton(src, srclen, (u8 *)&((struct sockaddr_in *)dst)->sin_addr, delim, end)) {
-		dst->ss_family = AF_INET;
-		return 1;
-	} else if (in6_pton(src, srclen, (u8 *)&((struct sockaddr_in6 *)dst)->sin6_addr, delim, end)) {
-		dst->ss_family = AF_INET6;
-		return 1;
-	} else
-		return 0;
+			ret = 1;
+		}
+		break;
+	default:
+		if (in4_pton(src, srclen, (u8 *)&((struct sockaddr_in *)dst)->sin_addr, delim, end)) {
+			dst->ss_family = AF_INET;
+			ret = 1;
+		} else if (in6_pton(src, srclen, (u8 *)&((struct sockaddr_in6 *)dst)->sin6_addr, delim, end)) {
+			dst->ss_family = AF_INET6;
+			ret = 1;
+		}
+		break;
+	}
+	return ret;
 }
 
 static __be32 set_netmask(short prefix)
@@ -1013,18 +1017,24 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	int invprefix;
 	int match = false; /* no match, no drop */
 
-	if (likely(mtinfo->mode & XT_RATELIMIT_PRIO))
+	switch (mtinfo->mode & XT_RATELIMIT_MASK) {
+	case XT_RATELIMIT_PRIO:
 		addr.ip = skb->priority;
-	else if (mtinfo->mode & XT_RATELIMIT_MARK)
+		break;
+	case XT_RATELIMIT_MARK:
 		addr.ip = skb->mark;
-	else if (unlikely(family == NFPROTO_IPV6)) {
-		const struct ipv6hdr *iph = ipv6_hdr(skb);
-		memcpy(addr.ip6, (mtinfo->mode & XT_RATELIMIT_DST) ?
-		    &iph->daddr : &iph->saddr, sizeof(addr.ip6));
-	} else {
-		const struct iphdr *iph = ip_hdr(skb);
-		addr.ip = (mtinfo->mode & XT_RATELIMIT_DST) ?
-			iph->daddr : iph->saddr;
+		break;
+	default:
+		if (unlikely(family == NFPROTO_IPV6)) {
+			const struct ipv6hdr *iph = ipv6_hdr(skb);
+			memcpy(addr.ip6, (mtinfo->mode & XT_RATELIMIT_DST) ?
+			    &iph->daddr : &iph->saddr, sizeof(addr.ip6));
+		} else {
+			const struct iphdr *iph = ip_hdr(skb);
+			addr.ip = (mtinfo->mode & XT_RATELIMIT_DST) ?
+				iph->daddr : iph->saddr;
+		}
+		break;
 	}
 
 	rcu_read_lock();
