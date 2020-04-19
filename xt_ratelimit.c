@@ -693,14 +693,23 @@ ratelimit_proc_write(struct file *file, const char __user *input,
 	return p - proc_buf;
 }
 
-static const struct file_operations ratelimit_fops = {
-	.owner		= THIS_MODULE,
-	.open		= ratelimit_proc_open,
-	.read		= seq_read,
-	.write		= ratelimit_proc_write,
-	.llseek		= seq_lseek,
-	.release	= seq_release,
-};
+#if  LINUX_VERSION_CODE < KERNEL_VERSION(5,6,0)
+#define PROC_OPS(s,o,r,w,l,d) static const struct file_operations s = { \
+	.open		= o, \
+	.read		= r, \
+	.write		= w, \
+	.llseek		= l, \
+	.release	= d \
+}
+#else
+#define PROC_OPS(s,o,r,w,l,d) static const struct proc_ops s = { \
+	.proc_open	= o , \
+	.proc_read	= r , \
+	.proc_write	= w , \
+	.proc_release	= d \
+}
+#endif
+PROC_OPS(ratelimit_fops, ratelimit_proc_open, seq_read, ratelimit_proc_write, seq_lseek, seq_release);
 
 /* allocate named hash table, register its proc entry */
 static int htable_create(struct net *net, struct xt_ratelimit_mtinfo *minfo)
