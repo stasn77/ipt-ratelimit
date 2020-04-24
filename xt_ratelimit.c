@@ -1,6 +1,6 @@
 /*
  * An implementation of committed access rate for Linux iptables
- * (c) 2015-2017 <abc@telekom.ru>
+ * (c) 2015-2020 <abc@openwall.com>
  *
  * Based on xt_hashlimit and in lesser extent on xt_recent.
  *
@@ -45,14 +45,14 @@
 #include "compat.h"
 #include "xt_ratelimit.h"
 
-#define XT_RATELIMIT_VERSION "0.3"
+#define XT_RATELIMIT_VERSION "0.3.1"
 #include "version.h"
 #ifdef GIT_VERSION
 # undef XT_RATELIMIT_VERSION
 # define XT_RATELIMIT_VERSION GIT_VERSION
 #endif
 
-MODULE_AUTHOR("<abc@telekom.ru>");
+MODULE_AUTHOR("<abc@openwall.com>");
 MODULE_DESCRIPTION("iptables ratelimit policer mt module");
 MODULE_LICENSE("GPL");
 MODULE_VERSION(XT_RATELIMIT_VERSION);
@@ -181,7 +181,7 @@ unsigned long calc_rate_est(const struct ratelimit_stat *stat)
 
 	{
 		const unsigned int slot_delta_rtime = RATEST_JIFFIES - (now % RATEST_JIFFIES);
-#define SMOOTH_VAUE 10 /* smoothen integer arithmetics */
+#define SMOOTH_VAUE 10 /* smoothen integer arithmetic */
 		const unsigned int prev_ratio = RATEST_JIFFIES * SMOOTH_VAUE / slot_delta_rtime;
 
 		bps = bps * SMOOTH_VAUE / prev_ratio;
@@ -693,23 +693,24 @@ ratelimit_proc_write(struct file *file, const char __user *input,
 	return p - proc_buf;
 }
 
-#if  LINUX_VERSION_CODE < KERNEL_VERSION(5,6,0)
-#define PROC_OPS(s,o,r,w,l,d) static const struct file_operations s = { \
-	.open		= o, \
-	.read		= r, \
-	.write		= w, \
-	.llseek		= l, \
-	.release	= d \
-}
+#ifdef DEFINE_PROC_SHOW_ATTRIBUTE
+static const struct proc_ops ratelimit_fops = {
+	.proc_open	= ratelimit_proc_open,
+	.proc_read	= seq_read,
+	.proc_write	= ratelimit_proc_write,
+	.proc_lseek	= seq_lseek,
+	.proc_release	= seq_release,
+};
 #else
-#define PROC_OPS(s,o,r,w,l,d) static const struct proc_ops s = { \
-	.proc_open	= o , \
-	.proc_read	= r , \
-	.proc_write	= w , \
-	.proc_release	= d \
-}
+static const struct file_operations ratelimit_fops = {
+	.owner		= THIS_MODULE,
+	.open		= ratelimit_proc_open,
+	.read		= seq_read,
+	.write		= ratelimit_proc_write,
+	.llseek		= seq_lseek,
+	.release	= seq_release,
+};
 #endif
-PROC_OPS(ratelimit_fops, ratelimit_proc_open, seq_read, ratelimit_proc_write, seq_lseek, seq_release);
 
 /* allocate named hash table, register its proc entry */
 static int htable_create(struct net *net, struct xt_ratelimit_mtinfo *minfo)
@@ -931,7 +932,7 @@ static void ratelimit_ent_add(struct xt_ratelimit_htable *ht,
 
 		hlist_add_head_rcu(&mt->node, &ht->hash[hash]);
 		ht->mt_count++;
-		/* mark bits in reverse order, becasue I need to search
+		/* mark bits in reverse order, because I need to search
 		 * from highest mask to lowest */
 		if (++ht->prefix_count[mt->prefix] == 1)
 			set_bit(max_prefix - mt->prefix, ht->prefix_bitmap);
