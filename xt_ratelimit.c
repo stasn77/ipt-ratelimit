@@ -45,7 +45,7 @@
 #include "compat.h"
 #include "xt_ratelimit.h"
 
-#define XT_RATELIMIT_VERSION "0.3.1"
+#define XT_RATELIMIT_VERSION "0.3.2"
 #include "version.h"
 #ifdef GIT_VERSION
 # undef XT_RATELIMIT_VERSION
@@ -1062,7 +1062,7 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 		const unsigned int len = skb->len; /* L3 */
 		u32 tok;
 
-		spin_lock(&ent->lock_bh);
+		spin_lock_bh(&ent->lock_bh);
 		tok = (now - car->last) * car->cir;
 		car->tc += len;
 		if (tok) {
@@ -1083,7 +1083,7 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 			rate_estimator(&ent->stat, now / RATEST_JIFFIES, len);
 		}
 #endif
-		spin_unlock(&ent->lock_bh);
+		spin_unlock_bh(&ent->lock_bh);
 
 		if (match) {
 			atomic64_add(len, &ent->stat.red_bytes);
